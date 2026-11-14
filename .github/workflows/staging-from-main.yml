@@ -1,0 +1,73 @@
+name: Staging from main
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-from-main
+  cancel-in-progress: false
+
+jobs:
+  fast-forward:
+    name: Fast-forward staging to main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Check dispatch ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] && [ "${REF}" != "refs/heads/main" ]; then
+            echo "::error::staging-from-main runs only from refs/heads/main (got '${REF}')."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch staging and main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin staging main
+
+      - name: Fast-forward staging
+        id: update
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if ! STAGING_SHA="$(git rev-parse --verify origin/staging 2>/dev/null)"; then
+            echo "::error::origin/staging is missing; cannot fast-forward it to ${SHA}."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${STAGING_SHA}" "${SHA}"; then
+            echo "::error::origin/staging has diverged from main; refusing to force-push. Make staging an ancestor of ${SHA}, then run this workflow again."
+            exit 1
+          fi
+          if [ "${STAGING_SHA}" = "${SHA}" ]; then
+            echo "pushed=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::origin/staging already points at ${SHA}; nothing to move."
+            exit 0
+          fi
+          git push origin "${SHA}:refs/heads/staging"
+          echo "pushed=true" >> "${GITHUB_OUTPUT}"
+          echo "::notice::Fast-forwarded refs/heads/staging to ${SHA}."
+
+      - name: Start STG build
+        if: steps.update.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run wallet-api-stg.yml --ref staging

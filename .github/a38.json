@@ -162,6 +162,11 @@
       "workflow": ".github/workflows/main-from-develop.yml",
       "job": "only-develop",
       "reason": "Checks that pull requests into main come from develop. It is not an author test."
+    },
+    {
+      "workflow": ".github/workflows/staging-from-main.yml",
+      "job": "fast-forward",
+      "reason": "Fast-forwards staging to every new main head and starts the STG build. It is housekeeping, not an author test."
     }
   ]
 }
